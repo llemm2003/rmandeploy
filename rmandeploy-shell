@@ -9,6 +9,7 @@ zfs_check=(`/bin/cat /etc/fstab | /bin/grep -i backup- | /usr/bin/wc -l`)
 TMP_DIRECTORY=/tmp/wget
 email_list=ravi.arumugam@oracle.com
 big_file_check_sql="select count(*) from dba_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');"
+encryption_check_sql="select count(*) from DBA_TABLESPACES where ENCRYPTED='YES';"
 OUTPUT=0
 
 #Link of the script, this script will download this via wget. 
@@ -169,9 +170,19 @@ done
 #Template configuration part.
 crontab -l | grep rmanBackup.sh || REFRESH_CRONTAB 
 
-v_RAC_CHECK=$(RAC_CHECK) 	#Flag to check if instance is RAC.
+#Check Version to detemine the proper sql. There are different SQL for encryption, vldb and multi tenant.
 v_VERSION=$(VERSION)		#Flag to check oracle version.
-v_BIGFILE=$(BIGFILE_CHECK)	#Flag to check if there are bigfile in the database.
+if [ "$v_VERSION" = "10g" ]; then
+ encryption_check_sql="select count(*) from DBA_ENCRYPTED_COLUMNS;"
+elif [ "$v_VERSION" = "12c" ]; then
+ v_CDB=$(connect_to_sql "select cdb from v\$database;") #Check if the 12c is a multi/single tenant
+ if [ "$v_CDB" = "CDB" ]; then
+  big_file_check_sql="select count(*) from cdb_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');" #If 12c is multi tenant, use cdb_tablespaces instead of dba_tablespaces
+ fi
+fi
+
+v_RAC_CHECK=$(RAC_CHECK) 	#Flag to check if instance is RAC.
+v_BIGFILE=$(connect_to_sql "$big_file_check_sql")	#Flag to check if there are bigfile in the database.
 
 if [ "${v_RAC_CHECK}" -eq "1" ]; then #First check, see if DB is configured as RAC.
  echo "RAC DB Detected. Pushing RAC related RMAN scripts"
@@ -201,4 +212,5 @@ fi
 #			-- Updated the sql for checking of encrypted tablespaces. Previous sql does not work with 10G. 
 #			-- Updated to make sure the script is only executed once and to remove the pause when the backing up files with read-only files (4--------) permission. 
 #10/14/2017 -- Updated the SQL for bigfile check, some of the DBs configured the temp to be bigfile. Without the updating the sql the rmandeploy script will deploy the rman scripts for bigfile tablespaces.
-#10/17/2017 -- Modified the logic for deploying single instance. New SQL for encryption, a view that will work on 10G+
+#10/17/2017 -- Modified the logic for deploying single instance. New SQL for encryption, a view that will both work on 10G+
+#10/18/2017 -- Added a separate code for version check since SQL for 10G encryption is not reliable to be used on none 10G and bigfile check for 12c CDB has a different view.
