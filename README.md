@@ -21,3 +21,5 @@ TODO:
 1. Version detection: Since some sql does not work on some version esp 10Gr1 versions.
 2. Multi-tenant and single tenant detection: Current sql does not work on single and multi tenant
 3. Incorporate Level 1 backup piece validation.
+
+#10/17/2017 -- Modified the logic for deploying single instance.
