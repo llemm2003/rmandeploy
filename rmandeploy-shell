@@ -187,10 +187,6 @@ else
   cp  "$RMAN_DIR/rmanConfigure-template11gup.rcv" "$RMAN_DIR/rmanConfigure-template.rcv"
   cp  "$RMAN_DIR/rmanBackup-FULL-template11gup.rcv" "$RMAN_DIR/rmanBackup-FULL-template.rcv"
   cp  "$RMAN_DIR/rmanBackup-INC-template11gup.rcv" "$RMAN_DIR/rmanBackup-INC-template.rcv"
- else 
-  cp  "$RMAN_DIR/rmanConfigure-RAC-template.rcv" "$RMAN_DIR/rmanConfigure-template.rcv"
-  cp  "$RMAN_DIR/rmanBackup-FULL_RAC-template.rcv" "$RMAN_DIR/rmanBackup-FULL-template.rcv"
-  cp  "$RMAN_DIR/rmanBackup-INC_RAC-template.rcv" "$RMAN_DIR/rmanBackup-INC-template.rcv"
  fi
 fi
 
@@ -203,4 +199,5 @@ fi
 #10/01/2017 -- Updated to support of checking of Bigfile, rman script with section size will only be pushed on DB that has bigfile tbs. 
 #			-- Updated the sql for checking of encrypted tablespaces. Previous sql does not work with 10G. 
 #			-- Updated to make sure the script is only executed once and to remove the pause when the backing up files with read-only files (4--------) permission. 
-#10/14/2-17 -- Updated the SQL for bigfile check, some of the DBs configured the temp to be bigfile. Without the updating the sql the rmandeploy script will deploy the rman scripts for bigfile tablespaces.
+#10/14/2017 -- Updated the SQL for bigfile check, some of the DBs configured the temp to be bigfile. Without the updating the sql the rmandeploy script will deploy the rman scripts for bigfile tablespaces.
+#10/17/2017 -- Modified the logic for deploying single instance. 
