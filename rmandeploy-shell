@@ -1,0 +1,206 @@
+#!/bin/sh
+
+#Variable declarations
+RMAN_DIR=/home/oracle/rman
+CHECK_DB=`grep -vE '^\#|^\*|^$|ASM|dg|ORCL' /etc/oratab| cut -d":" -f1`
+ORAENV_ASK=NO
+stampDate="backupfile-`date "+%m_%d_%y_%HH_%M_%S_%N"`"
+zfs_check=(`/bin/cat /etc/fstab | /bin/grep -i backup- | /usr/bin/wc -l`)
+TMP_DIRECTORY=/tmp/wget
+email_list=ravi.arumugam@oracle.com
+OUTPUT=0
+
+#Link of the script, this script will download this via wget. 
+SCRIPT_LOCATION="http://depot:8080/export/scripts/DBA/backups/backup_db_oracle"
+
+#Check then count if there are configured database in the server via oratab
+db_count=$(echo $CHECK_DB|wc -l)
+
+#Function to set environment, This function needs an input. The input is db's name, it will check if it has process.
+#Useful for rac databases since rac needs instance number to set the environment appropriatelt, oratab does not have instance number but the process has so will use the process to get the instance number.
+SET_ENVIRONMENT () {
+for environment in "$@"
+do
+if [ "$environment" == "ORCL" ]; then
+echo ORCL FOUND MUST SKIP
+else
+PROCESS_RUNNING=$(ps -ef | grep pmon|grep "$environment"| cut -d"_" -f3,4|grep -vE 'oracle|ASM')
+echo $PROCESS_RUNNING -- FOUND PROCESS
+if [[ "$PROCESS_RUNNING" == "$environment"* ]]; then
+export ORACLE_SID="$1"
+. oraenv
+export ORACLE_SID="$PROCESS_RUNNING"
+OUTPUT=OK
+fi
+fi
+done
+
+if [ "$OUTPUT" == "OK" ]; then
+echo "DB NAME BELOW:"
+connect_to_sql "select name from v\$database;"
+else
+EXIT_PROC "No running process for the DBs in oratab"
+fi
+}
+
+#Checking required directory for this operation
+CREATE_IF_NEEDED () {
+[ -d "$TMP_DIRECTORY" ] && rm -rf "$TMP_DIRECTORY\*" || mkdir -p "$TMP_DIRECTORY"
+[ -d "$RMAN_DIR" ] && echo $RMAN_DIR is existing || mkdir -p "$RMAN_DIR"
+}
+
+#Function to be used if the script needs to execute a query. It requires an input, the input is the sqlplus command or an sql.
+connect_to_sql () {
+SQL_OUTPUT=$( $ORACLE_HOME/bin/sqlplus -s / as sysdba<< OCI
+set heading off
+$1
+exit
+OCI
+)
+echo "$SQL_OUTPUT" | grep -v \^$
+}
+
+#Check DB Version
+VERSION () {
+connect_to_sql "select banner from v\$version;" | grep 'Oracle Database'| cut -d" " -f3
+}
+
+#Check for Encrypted columns
+ENCRYPTED_COLUMNS () {
+connect_to_sql "select count(*) from dba_tablespaces where ENCRYPTED='YES';"
+}
+
+BIGFILE_CHECK () {
+connect_to_sql "select count(*) from dba_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');"
+}
+
+#Determine weather database is RAC or Non-RAC. In case of RAC, replace manConfigure-template.rcv with updated manConfigure-RAC-template.rcv file
+RAC_CHECK () {
+connect_to_sql "select count(*) from v\$parameter where name='cluster_database' and value='TRUE';"
+}
+
+#Function to download the needed files from the SCRIPT_LOCATION variable via wget command. It requires an input, the input is the file to be downloaded.
+WGET_SCRIPT () {
+cd "$TMP_DIRECTORY"
+for get_files in "$@"
+do
+/usr/bin/wget -nv -nd -np -r -l1 -A"$get_files" -N $SCRIPT_LOCATION
+done
+}
+
+#Compare files, this function will compare files from staging directory, if the files matches it won't be refresh, file will be refreshed if the md5sum is not identical.  
+#Using md5sum_value for the md5sum value of a file
+#$1 is the home/oracle/rman and $2 is the temp directory
+COMPARE_FILE () {
+for compare_files in `ls $2`
+ do
+ if [ ! -e "$1/$compare_files" ]; then
+ echo $compare_files is not existing rman scripts directory. Copying.
+ cp $2/$compare_files $1/ && echo $compare_files successfully copied.
+ elif [ -e "$1/$compare_files" ]; then
+ md5sum_value_tmp=$(md5sum "$2/$compare_files"| cut -d" " -f1)
+ echo $md5sum_value_tmp
+ md5sum_value_curr=$(md5sum "$1/$compare_files"| cut -d" " -f1)
+ echo $md5sum_value_curr
+  if [[ "$md5sum_value_curr" == "$md5sum_value_tmp" ]]; then
+   echo $compare_files is upto date.
+  else
+   echo "Outdated File!-- $compare_files"
+   mv "$1/$compare_files" "$1/$compare_files.$stampDate" 
+   echo copying the update $compare_files
+   cp  $2/$compare_files $1 && echo $compare_files successfully copied.
+  fi
+ fi
+done
+}
+
+#Refresh Crontab part(temporary)
+REFRESH_CRONTAB () {
+crontab -l| grep -v rmanBackup >/tmp/crontab.backup
+echo "0 0,2,4,6,8,10,12,14,16,18,20,22 * * * /home/oracle/rman/rmanBackup.sh rmanBackup-ARC-template.rcv" >>/tmp/crontab.backup
+echo "0 1 * * 1,2,3,4,5,0 /home/oracle/rman/rmanBackup.sh rmanBackup-INC-template.rcv" >>/tmp/crontab.backup
+echo "0 1 * * 6 /home/oracle/rman/rmanBackup.sh rmanBackup-FULL-template.rcv" >>/tmp/crontab.backup
+echo "0 5 * * 0 /home/oracle/rman/rmanBackup.sh rmanMaintain-template.rcv" >>/tmp/crontab.backup
+crontab /tmp/crontab.backup
+crontab -l
+}
+
+#Exit function, this will be invoked if major errors are found
+EXIT_PROC () {
+echo "$1" && exit 1
+}
+
+
+#MAIN
+for i in `echo "$CHECK_DB"`
+do
+ echo "$CHECK_DB"
+ SET_ENVIRONMENT `echo "$CHECK_DB"`
+ /bin/cat /etc/fstab > /tmp/$stampDate.Date
+ /bin/cat /etc/oratab >> /tmp/$stampDate.Date
+ CREATE_IF_NEEDED
+ if [ "$zfs_check" -gt "0" ]; then
+  #If there is a mounted zfs then continue, if not it will exit without copying the scripts.
+  if [ "$(ENCRYPTED_COLUMNS)" -lt "1" ]; then
+   ONCE=1
+   echo "There are no  encrypted columns in the database -- Pushing script for non encrypted DB."
+   WGET_SCRIPT rmanBackup.sh.encrypt rman_encrypted.passwd '*.rcv' || EXIT_PROC "Error in downloading scripts from depot exiting"
+   COMPARE_FILE "$RMAN_DIR" "$TMP_DIRECTORY"
+   cd $RMAN_DIR
+   /bin/mv -f rmanBackup.sh.encrypt rmanBackup.sh
+   /bin/chmod 755 /home/oracle/rman/rmanBackup.sh
+   /bin/mv -f rman_encrypted.passwd .encrypted_passwd
+   /bin/chmod 400 /home/oracle/rman/.encrypted_passwd
+   /bin/mailx -s "RMAN encrypted script copied on ${HOSTNAME}" $email_list < /tmp/$stampDate.Date
+  else
+   ONCE=1
+   echo "There are $ENCRYPTED_COLUMNS encrypted columns in the database -- Pushing the encrypted DB scripts"
+   WGET_SCRIPT '*.sh' '*.rcv' || EXIT_PROC "Error in downloading scripts from depot exiting"
+   COMPARE_FILE "$RMAN_DIR" "$TMP_DIRECTORY"
+   cd $RMAN_DIR
+   /bin/chmod 755 /home/oracle/rman/rmanBackup.sh
+  fi
+ else
+  /bin/mailx -s "install u05-ZFS on ${HOSTNAME}" $email_list < /tmp/$stampDate.Date
+  exit 1
+ fi
+done
+#Template configuration part.
+crontab -l | grep rmanBackup.sh || REFRESH_CRONTAB 
+
+v_RAC_CHECK=$(RAC_CHECK) 	#Flag to check if instance is RAC.
+v_VERSION=$(VERSION)		#Flag to check oracle version.
+v_BIGFILE=$(BIGFILE_CHECK)	#Flag to check if there are bigfile in the database.
+
+if [ "${v_RAC_CHECK}" -eq "1" ]; then #First check, see if DB is configured as RAC.
+ echo "RAC DB Detected. Pushing RAC related RMAN scripts"
+ if [ "${v_VERSION}" != "10g" -a "${v_BIGFILE}" -gt "0" ]; then 
+  echo "11G+ DB and Bigfile Detected, num of bigfile in found in DB: $v_BIGFILE"
+  cp  "$RMAN_DIR/rmanConfigure-RAC-template11gup.rcv" "$RMAN_DIR/rmanConfigure-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-FULL_RAC-template11gup.rcv" "$RMAN_DIR/rmanBackup-FULL-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-INC_RAC-template11gup.rcv" "$RMAN_DIR/rmanBackup-INC-template.rcv"
+ fi
+else 
+ echo "Single instance DB Detected. Pushing Single instance related RMAN scripts"
+ if [ "${v_VERSION}" != "10g" -a "${v_BIGFILE}" -gt "0" ]; then
+  echo "11G+ DB and Bigfile Detected, num of bigfile in found in DB: $v_BIGFILE"
+  cp  "$RMAN_DIR/rmanConfigure-template11gup.rcv" "$RMAN_DIR/rmanConfigure-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-FULL-template11gup.rcv" "$RMAN_DIR/rmanBackup-FULL-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-INC-template11gup.rcv" "$RMAN_DIR/rmanBackup-INC-template.rcv"
+ else 
+  cp  "$RMAN_DIR/rmanConfigure-RAC-template.rcv" "$RMAN_DIR/rmanConfigure-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-FULL_RAC-template.rcv" "$RMAN_DIR/rmanBackup-FULL-template.rcv"
+  cp  "$RMAN_DIR/rmanBackup-INC_RAC-template.rcv" "$RMAN_DIR/rmanBackup-INC-template.rcv"
+ fi
+fi
+
+#08/31/2016 -- Second Version. This is the updated version of Ravi's script. I'm pretty sure there are still errors here since I only tested in 2 servers and no database encryption.
+#09/01/2016 -- Changed the schedulefor maintain template. Changed Crontab logic to not refresh crontab if there is configured already but will changed if the configured template is not for the type of database, plus major changes in the script to accomodate RAC1
+#09/08/2016 -- Fixed problem in creating crontab and copy of templates. No change in crontab if rmanBackup.sh is already configured.
+#09/22/2016 -- Updated the script_location SCRIPT_LOCATION="http://depot:8080/export/scripts/DBA/backups/backup_db_oracle" from SCRIPT_LOCATION="http://depot:8080/export/scripts/OCI/backup/backup_db_oracle/v2016.MARCH.15"
+#02/01/2017 -- Found problem in encrypted DB scripts. Rewrote the logic to copy the correct script for encrypted and non encrypted DB.
+#08/10/2017 -- Updated for version 11g (and higher) to use new .RCV files having "section size".    supports bigfile datafile type.
+#10/01/2017 -- Updated to support of checking of Bigfile, rman script with section size will only be pushed on DB that has bigfile tbs. 
+#			-- Updated the sql for checking of encrypted tablespaces. Previous sql does not work with 10G. 
+#			-- Updated to make sure the script is only executed once and to remove the pause when the backing up files with read-only files (4--------) permission. 
+#10/14/2-17 -- Updated the SQL for bigfile check, some of the DBs configured the temp to be bigfile. Without the updating the sql the rmandeploy script will deploy the rman scripts for bigfile tablespaces.
