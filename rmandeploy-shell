@@ -8,6 +8,7 @@ stampDate="backupfile-`date "+%m_%d_%y_%HH_%M_%S_%N"`"
 zfs_check=(`/bin/cat /etc/fstab | /bin/grep -i backup- | /usr/bin/wc -l`)
 TMP_DIRECTORY=/tmp/wget
 email_list=ravi.arumugam@oracle.com
+big_file_check_sql="select count(*) from dba_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');"
 OUTPUT=0
 
 #Link of the script, this script will download this via wget. 
@@ -67,11 +68,11 @@ connect_to_sql "select banner from v\$version;" | grep 'Oracle Database'| cut -d
 
 #Check for Encrypted columns
 ENCRYPTED_COLUMNS () {
-connect_to_sql "select count(*) from dba_tablespaces where ENCRYPTED='YES';"
+connect_to_sql "select count(*) from DBA_ENCRYPTED_COLUMNS;"
 }
 
 BIGFILE_CHECK () {
-connect_to_sql "select count(*) from dba_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');"
+connect_to_sql "$big_file_check_sql"
 }
 
 #Determine weather database is RAC or Non-RAC. In case of RAC, replace manConfigure-template.rcv with updated manConfigure-RAC-template.rcv file
@@ -200,4 +201,4 @@ fi
 #			-- Updated the sql for checking of encrypted tablespaces. Previous sql does not work with 10G. 
 #			-- Updated to make sure the script is only executed once and to remove the pause when the backing up files with read-only files (4--------) permission. 
 #10/14/2017 -- Updated the SQL for bigfile check, some of the DBs configured the temp to be bigfile. Without the updating the sql the rmandeploy script will deploy the rman scripts for bigfile tablespaces.
-#10/17/2017 -- Modified the logic for deploying single instance. 
+#10/17/2017 -- Modified the logic for deploying single instance. New SQL for encryption, a view that will work on 10G+
