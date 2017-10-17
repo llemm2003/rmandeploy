@@ -1,0 +1,2 @@
+# rmandeploy
+rman deploy script
