@@ -120,7 +120,7 @@ done
 REFRESH_CRONTAB () {
 crontab -l| grep -v rmanBackup >/tmp/crontab.backup
 echo "0 0,2,4,6,8,10,12,14,16,18,20,22 * * * /home/oracle/rman/rmanBackup.sh rmanBackup-ARC-template.rcv" >>/tmp/crontab.backup
-echo "0 1 * * 1,2,3,4,5,0 /home/oracle/rman/rmanBackup.sh rmanBackup-INC-template.rcv && /home/oracle/rman/rman_validate.sh" >>/tmp/crontab.backup
+echo "0 1 * * 1,2,3,4,5,0 /home/oracle/rman/rmanBackup.sh rmanBackup-INC-template.rcv" >>/tmp/crontab.backup
 echo "0 1 * * 6 /home/oracle/rman/rmanBackup.sh rmanBackup-FULL-template.rcv" >>/tmp/crontab.backup
 echo "0 5 * * 0 /home/oracle/rman/rmanBackup.sh rmanMaintain-template.rcv" >>/tmp/crontab.backup
 crontab /tmp/crontab.backup
