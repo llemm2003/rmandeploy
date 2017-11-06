@@ -140,8 +140,9 @@ if [ "$v_VERSION" = "10g" ]; then
  encryption_check_sql="select count(*) from DBA_ENCRYPTED_COLUMNS;"
 elif [ "$v_VERSION" = "12c" ]; then
  v_CDB=$(connect_to_sql "select cdb from v\$database;") #Check if the 12c is a multi/single tenant
- if [ "$v_CDB" = "CDB" ]; then
+ if [ "$v_CDB" = "CDB" ] || [ "$v_CDB" = "YES" ] ; then
   big_file_check_sql="select count(*) from cdb_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');" #If 12c is multi tenant, use cdb_tablespaces instead of dba_tablespaces
+  encryption_check_sql="select count(*) from CDB_TABLESPACES where ENCRYPTED='YES';"
  fi
 fi
 
