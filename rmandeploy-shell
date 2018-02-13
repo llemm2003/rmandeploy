@@ -7,7 +7,7 @@ ORAENV_ASK=NO
 stampDate="backupfile-`date "+%m_%d_%y_%HH_%M_%S_%N"`"
 zfs_check=(`/bin/cat /etc/fstab | /bin/grep -i backup- | /usr/bin/wc -l`)
 TMP_DIRECTORY=/tmp/wget
-email_list=ravi.arumugam@oracle.com
+email_list=oci_dba_ww_grp@oracle.com
 big_file_check_sql="select count(*) from dba_tablespaces where BIGFILE='YES' and CONTENTS NOT IN ('UNDO','TEMPORARY');"
 encryption_check_sql="select count(*) from DBA_TABLESPACES where ENCRYPTED='YES';"
 OUTPUT=0
